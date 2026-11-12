@@ -1,17 +1,63 @@
 document.addEventListener("DOMContentLoaded", () => {
   const activitiesList = document.getElementById("activities-list");
   const activitySelect = document.getElementById("activity");
+  const signupContainer = document.getElementById("signup-container");
   const signupForm = document.getElementById("signup-form");
   const messageDiv = document.getElementById("message");
+  const authButton = document.getElementById("auth-button");
+  const authDialog = document.getElementById("auth-dialog");
+  const authCloseButton = document.getElementById("auth-close-button");
+  const loginForm = document.getElementById("login-form");
+  const logoutPanel = document.getElementById("logout-panel");
+  const logoutButton = document.getElementById("logout-button");
+  const authMessage = document.getElementById("auth-message");
+  let isAuthenticated = false;
+
+  function showAuthMessage(text, type = "error") {
+    authMessage.textContent = text;
+    authMessage.className = `message ${type}`;
+  }
+
+  function updateAuthUi() {
+    signupContainer.hidden = !isAuthenticated;
+    loginForm.classList.toggle("hidden", isAuthenticated);
+    logoutPanel.classList.toggle("hidden", !isAuthenticated);
+    authButton.setAttribute(
+      "aria-label",
+      isAuthenticated ? "Teacher account" : "Teacher sign in"
+    );
+    authButton.title = isAuthenticated ? "Teacher account" : "Teacher sign in";
+  }
+
+  async function refreshAuthStatus() {
+    try {
+      const response = await fetch("/auth/status");
+      const result = await response.json();
+      if (!response.ok) {
+        throw new Error(result.detail || "Unable to check teacher sign-in.");
+      }
+
+      isAuthenticated = result.authenticated;
+      updateAuthUi();
+    } catch (error) {
+      showAuthMessage(error.message || "Unable to check teacher sign-in.");
+      console.error("Error checking teacher sign-in:", error);
+    }
+  }
 
   // Function to fetch activities from API
   async function fetchActivities() {
     try {
       const response = await fetch("/activities");
+      if (!response.ok) {
+        throw new Error("Unable to load activities.");
+      }
       const activities = await response.json();
 
       // Clear loading message
       activitiesList.innerHTML = "";
+      const initialActivityOption = activitySelect.options[0];
+      activitySelect.replaceChildren(initialActivityOption);
 
       // Populate activities list
       Object.entries(activities).forEach(([name, details]) => {
@@ -29,8 +75,14 @@ document.addEventListener("DOMContentLoaded", () => {
               <ul class="participants-list">
                 ${details.participants
                   .map(
-                    (email) =>
-                      `<li><span class="participant-email">${email}</span><button class="delete-btn" data-activity="${name}" data-email="${email}">❌</button></li>`
+                    (email) => `<li>
+                      <span class="participant-email">${email}</span>
+                      ${
+                        isAuthenticated
+                          ? `<button class="delete-btn" data-activity="${name}" data-email="${email}" aria-label="Unregister ${email}">❌</button>`
+                          : ""
+                      }
+                    </li>`
                   )
                   .join("")}
               </ul>
@@ -57,7 +109,7 @@ document.addEventListener("DOMContentLoaded", () => {
       });
 
       // Add event listeners to delete buttons
-      document.querySelectorAll(".delete-btn").forEach((button) => {
+      activitiesList.querySelectorAll(".delete-btn").forEach((button) => {
         button.addEventListener("click", handleUnregister);
       });
     } catch (error) {
@@ -66,6 +118,61 @@ document.addEventListener("DOMContentLoaded", () => {
       console.error("Error fetching activities:", error);
     }
   }
+
+  authButton.addEventListener("click", () => {
+    authDialog.showModal();
+  });
+
+  authCloseButton.addEventListener("click", () => {
+    authDialog.close();
+  });
+
+  loginForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const formData = new FormData(loginForm);
+
+    try {
+      const response = await fetch("/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          username: formData.get("username"),
+          password: formData.get("password"),
+        }),
+      });
+      const result = await response.json();
+      if (!response.ok) {
+        throw new Error(result.detail || "Unable to sign in.");
+      }
+
+      isAuthenticated = true;
+      updateAuthUi();
+      loginForm.reset();
+      authDialog.close();
+      await fetchActivities();
+    } catch (error) {
+      showAuthMessage(error.message || "Unable to sign in.");
+      console.error("Error signing in:", error);
+    }
+  });
+
+  logoutButton.addEventListener("click", async () => {
+    try {
+      const response = await fetch("/auth/logout", { method: "POST" });
+      const result = await response.json();
+      if (!response.ok) {
+        throw new Error(result.detail || "Unable to sign out.");
+      }
+
+      isAuthenticated = false;
+      updateAuthUi();
+      authDialog.close();
+      await fetchActivities();
+    } catch (error) {
+      showAuthMessage(error.message || "Unable to sign out.");
+      console.error("Error signing out:", error);
+    }
+  });
 
   // Handle unregister functionality
   async function handleUnregister(event) {
@@ -156,5 +263,6 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   // Initialize app
-  fetchActivities();
+  updateAuthUi();
+  refreshAuthStatus().then(fetchActivities);
 });
